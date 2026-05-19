@@ -1,0 +1,584 @@
+{
+  "name": "AI Resume Screening",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU",
+          "mode": "list",
+          "cachedResultName": "Resume Screening System",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Responses",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU/edit#gid=0"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "d7591baa-0823-4fe1-bb68-fe30eeb2c91b",
+      "name": "Google Sheets Trigger",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "WqOIPeXimmoQVEOV",
+          "name": "Google Sheets Trigger account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        608,
+        0
+      ],
+      "id": "3682a3d3-3f8d-4851-a1d0-37372f29de5e",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU",
+          "mode": "list",
+          "cachedResultName": "Resume Screening System",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1818900809,
+          "mode": "list",
+          "cachedResultName": "Job Descriptions ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU/edit#gid=1818900809"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Job Role",
+              "lookupValue": "={{ $('Google Sheets Trigger').item.json['Job Role Applied'] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        784,
+        0
+      ],
+      "id": "cec07f8b-a43b-4749-8a69-73c0a9fefaeb",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "F3eO848qvXRRvs6J",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+      "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=#GEMINI_API_KEY",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [{\n    \"parts\": [{\n      \"text\":\n      \"Analyze the resume against the job description and return ONLY valid JSON.\\n\\nResume:\\n\" +\n      $('Extract from File').item.json.text +\n      \"\\n\\nJob Description:\\n\" +\n      $('Get row(s) in sheet').item.json['Job Description'] +\n      \"\\n\\nRequired Skills:\\n\" +\n      $('Get row(s) in sheet').item.json['Required Skills']\n    }]\n  }]\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        992,
+        0
+      ],
+      "id": "ea75b2c5-64b1-456c-9286-41269e89d134",
+      "name": "HTTP Request1",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nconst aiResponse =\nresponse.choices?.[0]?.message?.content ||\nresponse.candidates?.[0]?.content?.parts?.[0]?.text ||\nresponse.text ||\n\"\";\n\nlet parsed = {\n    extracted_skills: [],\n    experience_years: 0,\n    education: \"Unknown\",\n    projects: [],\n    strengths: [],\n    weaknesses: [],\n    missing_skills: [],\n    match_percentage: 0,\n    summary: \"No summary generated\"\n};\n\ntry {\n\n    const cleaned = aiResponse\n    .replace(/```json/g,\"\")\n    .replace(/```/g,\"\")\n    .trim();\n\n    parsed = {\n        ...parsed,\n        ...JSON.parse(cleaned)\n    };\n\n}\ncatch(e){\n\nconsole.log(e.message);\n\n}\n\n\n// Calculate score automatically\nif(parsed.match_percentage===0){\n\n    const found =\n    parsed.extracted_skills.length;\n\n    const missing =\n    parsed.missing_skills.length;\n\n    const total =\n    found+missing;\n\n    parsed.match_percentage=\n    total>0\n    ?Math.round((found/total)*100)\n    :0;\n\n}\n\n\n// Status\nconst score=parsed.match_percentage;\n\nparsed.status=\nscore>=80\n?\"Selected\"\n:score>=60\n?\"Under Review\"\n:\"Rejected\";\n\n\nconst sheet =\n$('Google Sheets Trigger')\n.first()\n.json;\n\n\nreturn [{\njson:{\n    test: \"working\",\n    candidate_name: \"Nishant Verma\",\n    candidate_email: \"nishant@gmail.com\",\n    job_role: \"Python Backend Developer\",\n    match_percentage: 80,\n    status: \"Selected\",\n    extracted_skills: [\"Python\",\"FastAPI\",\"Docker\"],\n    missing_skills: [\"PostgreSQL\"],\n    strengths: [\"REST API\",\"Backend Development\"],\n    summary: \"Test summary\"\n}\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        0
+      ],
+      "id": "eb775c37-b847-4c24-a260-44e351264103",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "d81b6368-ef54-42fb-ba7b-dea2a40e672c",
+                    "leftValue": "={{ Number($json.match_percentage) }}",
+                    "rightValue": 80,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Selected"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4ad76cc3-c920-4b31-acc5-d5f112bab822",
+                    "leftValue": "={{ Number($json.match_percentage) }}",
+                    "rightValue": 60,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Under Review"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1408,
+        192
+      ],
+      "id": "57e2e0f7-7775-4da0-83a4-ba862ba23a56",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "sendTo": "=$json.candidate_email",
+        "subject": "=Congratulations! You've been shortlisted — {{ $json.job_role }}",
+        "message": "=<p>Dear {{ $json.candidate_name }},</p> <p>We are delighted to inform you that after carefully reviewing your application for the position of <strong>{{ $json.job_role }}</strong>, you have been <strong>selected for an interview</strong>.</p> <p><strong>Your profile summary:</strong><br>{{ $json.summary }}</p> <p>Our team will reach out shortly with interview scheduling details. Please keep an eye on this email.</p> <p>Best regards,<br>HR Team</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        -64
+      ],
+      "id": "3e01b5d6-aace-44bd-bc3a-289e5aeff079",
+      "name": "Send a message",
+      "webhookId": "3e382b84-69c6-4201-8065-67dac1918a50",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "G28fe9vqsWDKaOtg",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=={{ $json.candidate_email || \"test@gmail.com\" }}",
+        "subject": "=Your application is under review — {{ $json.job_role }}",
+        "message": "=<p>Dear {{ $json.candidate_name }},</p> <p>We are delighted to inform you that after carefully reviewing your application for the position of <strong>{{ $json.job_role }}</strong>, you have been <strong>selected for an interview</strong>.</p> <p><strong>Your profile summary:</strong><br>{{ $json.summary }}</p> <p>Our team will reach out shortly with interview scheduling details. Please keep an eye on this email.</p> <p>Best regards,<br>HR Team</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        192
+      ],
+      "id": "a3bfc306-a4c4-46a8-8eb1-d75d9356bd8f",
+      "name": "Send a message1",
+      "webhookId": "57fcc5f6-5661-467e-a695-f8f3eabcf03a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "G28fe9vqsWDKaOtg",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=={{ $json.candidate_email || \"test@gmail.com\" }}",
+        "subject": "=Regarding your application — {{ $json.job_role }}",
+        "message": "=<p>Dear {{ $json.candidate_name }},</p> <p>Thank you for taking the time to apply for the <strong>{{ $json.job_role }}</strong> position. After careful consideration, we regret to inform you that we will not be moving forward with your application at this time.</p> <p>We encourage you to apply again in the future as your skills develop further. We wish you the very best in your career journey.</p> <p>Warm regards,<br>HR Team</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1728,
+        432
+      ],
+      "id": "fa1e9325-ed89-4241-b6d7-cf179a472acd",
+      "name": "Send a message2",
+      "webhookId": "86f1f13c-b066-463e-8b09-958d64ae1771",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "G28fe9vqsWDKaOtg",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU",
+          "mode": "list",
+          "cachedResultName": "Resume Screening System",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1167931583,
+          "mode": "list",
+          "cachedResultName": "Results",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/16HIeabgCA7josVAlStf77nPQLwxV44FVSKKIxI6HnFU/edit#gid=1167931583"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Candidate Name": "={{$node[\"Code in JavaScript\"].json[\"candidate_name\"]}}",
+            "Email": "={{$node[\"Code in JavaScript\"].json[\"candidate_email\"]}}",
+            "Job Role": "={{$node[\"Code in JavaScript\"].json[\"job_role\"]}}",
+            "Match Score": "={{$node[\"Code in JavaScript\"].json[\"match_percentage\"]}}",
+            "Status ": "={{$json.status || ''}}",
+            "Missing Skills": "={{$node[\"Code in JavaScript\"].json[\"missing_skills\"].join(\", \")}}",
+            "Skills Found": "={{$node[\"Code in JavaScript\"].json[\"extracted_skills\"].join(\", \")}}\n",
+            "Strengths": "={{$node[\"Code in JavaScript\"].json[\"strengths\"].join(\", \")}}",
+            "AI Summary": "={{$node[\"Code in JavaScript\"].json[\"summary\"]}}\n",
+            "Timestamp": "={{new Date().toISOString()}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Candidate Name",
+              "displayName": "Candidate Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Job Role",
+              "displayName": "Job Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Match Score",
+              "displayName": "Match Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status ",
+              "displayName": "Status ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Skills Found",
+              "displayName": "Skills Found",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Missing Skills",
+              "displayName": "Missing Skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Strengths",
+              "displayName": "Strengths",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "AI Summary",
+              "displayName": "AI Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2096,
+        96
+      ],
+      "id": "ab99ee78-014d-4069-8d88-12331fa450d1",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "F3eO848qvXRRvs6J",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$json[\"Resume URL\"].replace(\"file/d/\",\"uc?export=download&id=\").replace(\"/view?usp=drive_link\",\"\")}}",
+        "options": {
+          "lowercaseHeaders": false,
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        288,
+        0
+      ],
+      "id": "2feb173a-f950-4921-aeea-c35c1a26794b",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message2": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "06bda3a1-0c2a-4107-a2b6-091d34f1674f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "480babb88dd7dea40567edd117bfa476f2b918691b054f7184c2f8d3dc6f4ed1"
+  },
+  "id": "5OjanTN5a7SPDR8H",
+  "tags": []
+}
